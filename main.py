@@ -1,15 +1,57 @@
 """Token Vending Machine - Issues scoped AWS credentials based on Kubernetes service account identity."""
 
-import os
+import logging
+import sys
+import time
+import uuid
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Annotated
 
 import boto3
-from fastapi import Depends, FastAPI, Header, HTTPException, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
+from fastapi.responses import JSONResponse
 from kubernetes import client, config
 from kubernetes.client.exceptions import ApiException
 from pydantic import BaseModel
 from pydantic_settings import BaseSettings
+from pythonjsonlogger import jsonlogger
+
+# Context variable for request-scoped data
+request_id_ctx: ContextVar[str] = ContextVar("request_id", default="-")
+
+
+class ContextFilter(logging.Filter):
+    """Logging filter that adds request context to log records."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.request_id = request_id_ctx.get()
+        return True
+
+
+def setup_logging(log_level: str = "INFO") -> logging.Logger:
+    """Configure structured JSON logging to stdout."""
+    logger = logging.getLogger("tvm")
+    logger.setLevel(getattr(logging, log_level.upper(), logging.INFO))
+
+    # Remove existing handlers
+    logger.handlers.clear()
+
+    # JSON handler to stdout
+    handler = logging.StreamHandler(sys.stdout)
+    formatter = jsonlogger.JsonFormatter(
+        fmt="%(asctime)s %(levelname)s %(name)s %(request_id)s %(message)s",
+        rename_fields={"asctime": "timestamp", "levelname": "level", "name": "logger"},
+        datefmt="%Y-%m-%dT%H:%M:%S%z",
+    )
+    handler.setFormatter(formatter)
+    handler.addFilter(ContextFilter())
+    logger.addHandler(handler)
+
+    # Prevent propagation to root logger
+    logger.propagate = False
+
+    return logger
 
 
 class Settings(BaseSettings):
@@ -21,6 +63,7 @@ class Settings(BaseSettings):
     aws_secret_access_key: str
     policy_template_path: str = "/etc/token-vending-machine/policy.json"
     session_duration_seconds: int = 3600
+    log_level: str = "INFO"
 
     class Config:
         env_file = ".env"
@@ -34,9 +77,14 @@ class AwsCredentials(BaseModel):
     AWS_SESSION_TOKEN: str
 
 
+# Initialize settings and logger at startup
+settings = Settings()
+logger = setup_logging(settings.log_level)
+
+
 def get_settings() -> Settings:
     """Dependency to get application settings."""
-    return Settings()
+    return settings
 
 
 def get_k8s_client() -> client.AuthenticationV1Api:
@@ -60,6 +108,71 @@ app = FastAPI(
     description="Issues scoped AWS credentials based on Kubernetes service account identity",
     version="1.0.0",
 )
+
+
+@app.middleware("http")
+async def logging_middleware(request: Request, call_next):
+    """Middleware to log requests and add request ID context."""
+    request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
+    request_id_ctx.set(request_id)
+
+    start_time = time.perf_counter()
+
+    logger.info(
+        "Request started",
+        extra={
+            "method": request.method,
+            "path": request.url.path,
+            "client_ip": request.client.host if request.client else None,
+        },
+    )
+
+    try:
+        response = await call_next(request)
+        duration_ms = (time.perf_counter() - start_time) * 1000
+
+        logger.info(
+            "Request completed",
+            extra={
+                "method": request.method,
+                "path": request.url.path,
+                "status_code": response.status_code,
+                "duration_ms": round(duration_ms, 2),
+            },
+        )
+
+        response.headers["X-Request-ID"] = request_id
+        return response
+
+    except Exception as e:
+        duration_ms = (time.perf_counter() - start_time) * 1000
+        logger.exception(
+            "Request failed with exception",
+            extra={
+                "method": request.method,
+                "path": request.url.path,
+                "duration_ms": round(duration_ms, 2),
+                "error": str(e),
+            },
+        )
+        raise
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """Log HTTP exceptions."""
+    logger.warning(
+        "HTTP error response",
+        extra={
+            "status_code": exc.status_code,
+            "detail": exc.detail,
+        },
+    )
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail},
+        headers={"X-Request-ID": request_id_ctx.get()},
+    )
 
 
 def extract_bearer_token(authorization: str = Header(...)) -> str:
@@ -89,12 +202,17 @@ def validate_token_and_extract_identity(
     try:
         response = k8s_client.create_token_review(token_review)
     except ApiException as e:
+        logger.error(
+            "Kubernetes API error during token validation",
+            extra={"error": e.reason, "status": e.status},
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"Failed to validate token: {e.reason}",
         )
 
     if not response.status.authenticated:
+        logger.warning("Token authentication failed")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token is not valid or has expired",
@@ -103,6 +221,10 @@ def validate_token_and_extract_identity(
     # Username format: system:serviceaccount:<namespace>:<service-account-name>
     username = response.status.user.username
     if not username.startswith("system:serviceaccount:"):
+        logger.warning(
+            "Token is not from a service account",
+            extra={"username": username},
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token is not from a service account",
@@ -110,6 +232,10 @@ def validate_token_and_extract_identity(
 
     parts = username.split(":")
     if len(parts) != 4:
+        logger.warning(
+            "Invalid service account token format",
+            extra={"username": username},
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid service account token format",
@@ -117,6 +243,11 @@ def validate_token_and_extract_identity(
 
     namespace = parts[2]
     service_account = parts[3]
+
+    logger.info(
+        "Token validated successfully",
+        extra={"namespace": namespace, "service_account": service_account},
+    )
 
     return namespace, service_account
 
@@ -130,11 +261,16 @@ def load_and_render_policy(
     try:
         policy_template = Path(template_path).read_text()
     except FileNotFoundError:
+        logger.error("Policy template not found", extra={"path": template_path})
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Policy template not found",
         )
     except IOError as e:
+        logger.error(
+            "Failed to read policy template",
+            extra={"path": template_path, "error": str(e)},
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to read policy template: {e}",
@@ -143,6 +279,11 @@ def load_and_render_policy(
     # Render the template with namespace and service account
     rendered_policy = policy_template.replace("${namespace}", namespace)
     rendered_policy = rendered_policy.replace("${serviceaccount}", service_account)
+
+    logger.debug(
+        "Policy template rendered",
+        extra={"namespace": namespace, "service_account": service_account},
+    )
 
     return rendered_policy
 
@@ -163,16 +304,39 @@ def assume_role_with_policy(
             DurationSeconds=duration_seconds,
         )
     except Exception as e:
+        logger.error(
+            "Failed to assume AWS role",
+            extra={"role_arn": role_arn, "session_name": session_name, "error": str(e)},
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to assume role: {e}",
         )
+
+    logger.info(
+        "AWS role assumed successfully",
+        extra={"role_arn": role_arn, "session_name": session_name},
+    )
 
     credentials = response["Credentials"]
     return AwsCredentials(
         AWS_ACCESS_KEY_ID=credentials["AccessKeyId"],
         AWS_SECRET_ACCESS_KEY=credentials["SecretAccessKey"],
         AWS_SESSION_TOKEN=credentials["SessionToken"],
+    )
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Log application startup."""
+    logger.info(
+        "Token Vending Machine starting",
+        extra={
+            "aws_region": settings.aws_region,
+            "aws_role_arn": settings.aws_role_arn,
+            "policy_template_path": settings.policy_template_path,
+            "session_duration_seconds": settings.session_duration_seconds,
+        },
     )
 
 
@@ -223,4 +387,3 @@ if __name__ == "__main__":
     import uvicorn
 
     uvicorn.run(app, host="0.0.0.0", port=8000)
-
