@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: token-vending-machine
+  namespace: token-vending-machine
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: token-vending-machine
+rules:
+  - apiGroups: ["authentication.k8s.io"]
+    resources: ["tokenreviews"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: token-vending-machine
+subjects:
+  - kind: ServiceAccount
+    name: token-vending-machine
+    namespace: token-vending-machine
+roleRef:
+  kind: ClusterRole
+  name: token-vending-machine
+  apiGroup: rbac.authorization.k8s.io
+
