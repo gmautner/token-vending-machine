@@ -82,7 +82,8 @@ class AwsCredentials(BaseModel):
 
 
 # Initialize settings and logger at startup
-settings = Settings()
+# Settings are loaded from environment variables by pydantic-settings
+settings = Settings()  # type: ignore[call-arg]
 logger = setup_logging(settings.log_level)
 
 
