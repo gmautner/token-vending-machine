@@ -4,7 +4,7 @@ A Kubernetes-native service that exchanges Kubernetes service account tokens for
 
 ## How It Works
 
-```
+```text
 ┌─────────────────┐     ┌─────────────────────┐     ┌─────────────┐     ┌─────────────┐
 │   K8s Workload  │────▶│  Token Vending      │────▶│  K8s API    │     │   AWS STS   │
 │                 │     │  Machine            │     │  TokenReview│     │             │
@@ -39,6 +39,7 @@ Content-Type: application/json
 ```
 
 The token should be a Kubernetes service account token, either:
+
 - Mounted at `/var/run/secrets/kubernetes.io/serviceaccount/token`
 - Created via `kubectl create token <serviceaccount>`
 
@@ -313,7 +314,7 @@ stringData:
   AWS_SECRET_ACCESS_KEY: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 ```
 
-#### Deployment
+#### Deployment manifest
 
 ```yaml
 apiVersion: apps/v1
@@ -485,4 +486,3 @@ python main.py
 ## License
 
 MIT
-
