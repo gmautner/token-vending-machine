@@ -9,7 +9,7 @@
         "s3:DeleteObject"
       ],
       "Resource": [
-        "arn:aws:s3:::my-bucket/${namespace}/${serviceaccount}/*"
+        "arn:aws:s3:::my-bucket/{{ namespace }}/{{ serviceaccount }}/*"
       ]
     },
     {
@@ -22,7 +22,7 @@
       ],
       "Condition": {
         "StringLike": {
-          "s3:prefix": ["${namespace}/${serviceaccount}/*"]
+          "s3:prefix": ["{{ namespace }}/{{ serviceaccount }}/*"]
         }
       }
     }

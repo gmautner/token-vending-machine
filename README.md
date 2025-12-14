@@ -87,12 +87,12 @@ Health check endpoint.
 
 ## Policy Template
 
-The policy template is a JSON file with placeholders that get replaced with the requesting workload's identity:
+The policy template uses [Jinja2](https://jinja.palletsprojects.com/) syntax. The following variables are available:
 
-| Placeholder | Replaced With |
-|-------------|---------------|
-| `${namespace}` | Kubernetes namespace of the service account |
-| `${serviceaccount}` | Name of the service account |
+| Variable | Description |
+|----------|-------------|
+| `{{ namespace }}` | Kubernetes namespace of the service account |
+| `{{ serviceaccount }}` | Name of the service account |
 
 ### Example Template
 
@@ -108,7 +108,7 @@ The policy template is a JSON file with placeholders that get replaced with the 
         "s3:DeleteObject"
       ],
       "Resource": [
-        "arn:aws:s3:::my-bucket/${namespace}/${serviceaccount}/*"
+        "arn:aws:s3:::my-bucket/{{ namespace }}/{{ serviceaccount }}/*"
       ]
     },
     {
@@ -117,7 +117,7 @@ The policy template is a JSON file with placeholders that get replaced with the 
       "Resource": ["arn:aws:s3:::my-bucket"],
       "Condition": {
         "StringLike": {
-          "s3:prefix": ["${namespace}/${serviceaccount}/*"]
+          "s3:prefix": ["{{ namespace }}/{{ serviceaccount }}/*"]
         }
       }
     }
@@ -126,6 +126,32 @@ The policy template is a JSON file with placeholders that get replaced with the 
 ```
 
 This example grants each workload access only to its own prefix in S3: `s3://my-bucket/<namespace>/<serviceaccount>/`.
+
+### Advanced Templating
+
+Since Jinja2 is used, you can leverage conditionals, filters, and more:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": ["s3:*"],
+      "Resource": [
+        "arn:aws:s3:::{{ 'prod' if namespace == 'production' else 'dev' }}-bucket/{{ namespace }}/{{ serviceaccount }}/*"
+      ]
+    }
+    {% if namespace == "production" %},
+    {
+      "Effect": "Allow",
+      "Action": ["kms:Decrypt"],
+      "Resource": ["arn:aws:kms:*:*:key/prod-key-id"]
+    }
+    {% endif %}
+  ]
+}
+```
 
 ---
 

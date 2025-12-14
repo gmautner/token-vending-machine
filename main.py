@@ -13,6 +13,7 @@ from typing import Annotated
 import boto3
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.responses import JSONResponse
+from jinja2 import Template, TemplateError
 from kubernetes import client, config
 from kubernetes.client.exceptions import ApiException
 from pydantic import BaseModel
@@ -276,7 +277,7 @@ def load_and_render_policy(
     namespace: str,
     service_account: str,
 ) -> str:
-    """Load IAM policy template and render with provided values."""
+    """Load IAM policy template and render with Jinja2."""
     try:
         policy_template = Path(template_path).read_text()
     except FileNotFoundError:
@@ -295,9 +296,21 @@ def load_and_render_policy(
             detail=f"Failed to read policy template: {e}",
         )
 
-    # Render the template with namespace and service account
-    rendered_policy = policy_template.replace("${namespace}", namespace)
-    rendered_policy = rendered_policy.replace("${serviceaccount}", service_account)
+    # Render the template with Jinja2
+    try:
+        rendered_policy = Template(policy_template).render(
+            namespace=namespace,
+            serviceaccount=service_account,
+        )
+    except TemplateError as e:
+        logger.error(
+            "Failed to render policy template",
+            extra={"path": template_path, "error": str(e)},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to render policy template: {e}",
+        )
 
     logger.debug(
         "Policy template rendered",
