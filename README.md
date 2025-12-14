@@ -84,6 +84,7 @@ Health check endpoint.
 | `POLICY_TEMPLATE_PATH` | No | `/etc/token-vending-machine/policy.json` | Path to the IAM policy template |
 | `SESSION_DURATION_SECONDS` | No | `3600` | Duration of issued credentials (1-12 hours) |
 | `LOG_LEVEL` | No | `INFO` | Log verbosity: `DEBUG`, `INFO`, `WARNING`, `ERROR` |
+| `PORT` | No | `8000` | Port the service listens on |
 
 ## Policy Template
 

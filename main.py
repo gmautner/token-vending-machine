@@ -67,6 +67,7 @@ class Settings(BaseSettings):
     policy_template_path: str = "/etc/token-vending-machine/policy.json"
     session_duration_seconds: int = 3600
     log_level: str = "INFO"
+    port: int = 8000
 
     class Config:
         env_file = ".env"
@@ -404,4 +405,4 @@ def get_credentials(
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=settings.port)
