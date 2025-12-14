@@ -4,6 +4,8 @@ import logging
 import sys
 import time
 import uuid
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from pathlib import Path
 from typing import Annotated
@@ -82,6 +84,22 @@ settings = Settings()
 logger = setup_logging(settings.log_level)
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    """Application lifespan handler for startup and shutdown events."""
+    logger.info(
+        "Token Vending Machine starting",
+        extra={
+            "aws_region": settings.aws_region,
+            "aws_role_arn": settings.aws_role_arn,
+            "policy_template_path": settings.policy_template_path,
+            "session_duration_seconds": settings.session_duration_seconds,
+        },
+    )
+    yield
+    logger.info("Token Vending Machine shutting down")
+
+
 def get_settings() -> Settings:
     """Dependency to get application settings."""
     return settings
@@ -107,6 +125,7 @@ app = FastAPI(
     title="Token Vending Machine",
     description="Issues scoped AWS credentials based on Kubernetes service account identity",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 
@@ -323,20 +342,6 @@ def assume_role_with_policy(
         AWS_ACCESS_KEY_ID=credentials["AccessKeyId"],
         AWS_SECRET_ACCESS_KEY=credentials["SecretAccessKey"],
         AWS_SESSION_TOKEN=credentials["SessionToken"],
-    )
-
-
-@app.on_event("startup")
-async def startup_event():
-    """Log application startup."""
-    logger.info(
-        "Token Vending Machine starting",
-        extra={
-            "aws_region": settings.aws_region,
-            "aws_role_arn": settings.aws_role_arn,
-            "policy_template_path": settings.policy_template_path,
-            "session_duration_seconds": settings.session_duration_seconds,
-        },
     )
 
 
