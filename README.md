@@ -469,6 +469,36 @@ aws s3 ls s3://my-bucket/
 docker build -t token-vending-machine:latest .
 ```
 
+## Releasing
+
+Docker images are automatically built and pushed to GitHub Container Registry when a version tag is pushed.
+
+### Create a Release
+
+```bash
+# Tag the release
+git tag v1.0.0
+
+# Push the tag to trigger the build
+git push origin v1.0.0
+```
+
+### Image Tags Generated
+
+For a git tag `v1.2.3`, the following Docker images are published:
+
+| Image Tag | Description |
+|-----------|-------------|
+| `ghcr.io/<owner>/token-vending-machine:1.2.3` | Exact version |
+| `ghcr.io/<owner>/token-vending-machine:1.2` | Major.minor (updated on each patch) |
+| `ghcr.io/<owner>/token-vending-machine:latest` | Latest release |
+
+### Pull the Image
+
+```bash
+docker pull ghcr.io/lwsa-tech/token-vending-machine:latest
+```
+
 ## Local Development
 
 ```bash
