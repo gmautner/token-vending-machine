@@ -11,12 +11,18 @@ updates:
       - "dependencies"
       - "python"
     open-pull-requests-limit: 10
+    rebase-strategy: auto
     groups:
-      # Group all patch updates together for easier auto-merge
+      # Group all patch updates together for auto-merge
       patch-updates:
         applies-to: version-updates
         update-types:
           - "patch"
+      # Group all minor updates together to avoid conflicts
+      minor-updates:
+        applies-to: version-updates
+        update-types:
+          - "minor"
 
   - package-ecosystem: "github-actions"
     directory: "/"
