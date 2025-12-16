@@ -19,12 +19,7 @@
       ],
       "Resource": [
         "arn:aws:s3:::my-bucket"
-      ],
-      "Condition": {
-        "StringLike": {
-          "s3:prefix": ["{{ namespace }}/{{ serviceaccount }}/*"]
-        }
-      }
+      ]
     }
   ]
 }
